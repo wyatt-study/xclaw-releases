@@ -57,7 +57,7 @@ jobs:
       - name: Build macOS arm64 package
         shell: bash
         env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           bash scripts/electron-dist-mac.sh --arm64
 
@@ -72,7 +72,7 @@ jobs:
       - name: Build macOS x64 package
         shell: bash
         env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           for attempt in 1 2 3; do
             bash scripts/electron-dist-mac.sh --x64 && break
@@ -131,7 +131,7 @@ jobs:
       - name: Build Windows x64 package
         shell: pwsh
         run: |
-          $env:NODE_OPTIONS="--max-old-space-size=4096"
+          $env:NODE_OPTIONS="--max-old-space-size=8192"
           bun run electron:build
           Set-Location apps/electron
           npx electron-builder --config electron-builder.yml --win --x64 --publish never
@@ -184,7 +184,7 @@ jobs:
       - name: Build Linux x64 package
         shell: bash
         run: |
-          export NODE_OPTIONS="--max-old-space-size=4096"
+          export NODE_OPTIONS="--max-old-space-size=8192"
           bun run electron:build
           cd apps/electron
           npx electron-builder --config electron-builder.yml --linux --x64 --publish never
