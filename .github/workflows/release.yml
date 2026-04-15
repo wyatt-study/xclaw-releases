@@ -59,7 +59,7 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
-          bash scripts/electron-dist-mac.sh --arm64
+          bash scripts/electron-dist-mac.sh --arm64 --publish never
 
       - name: Cleanup DMG mounts before x64 build
         shell: bash
@@ -75,7 +75,7 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=8192"
         run: |
           for attempt in 1 2 3; do
-            bash scripts/electron-dist-mac.sh --x64 && break
+            bash scripts/electron-dist-mac.sh --x64 --publish never && break
             echo "Attempt $attempt failed, retrying in 10s..."
             hdiutil detach /Volumes/XClaw* 2>/dev/null || true
             sleep 10
