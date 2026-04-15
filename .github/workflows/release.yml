@@ -1,0 +1,201 @@
+name: Release Desktop Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Branch or tag to build from daziclaw repo'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: write
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+  CSC_LINK: ${{ secrets.CSC_LINK }}
+  CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+  XCLAW_SKILL_STORE_FEISHU_APP_ID: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_APP_ID }}
+  XCLAW_SKILL_STORE_FEISHU_APP_SECRET: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_APP_SECRET }}
+  XCLAW_SKILL_STORE_FEISHU_BASE_URL: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_BASE_URL }}
+  XCLAW_SKILL_STORE_FEISHU_APP_TOKEN: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_APP_TOKEN }}
+  XCLAW_SKILL_STORE_FEISHU_SKILLS_TABLE: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_SKILLS_TABLE }}
+  XCLAW_SKILL_STORE_FEISHU_ICONS_TABLE: ${{ secrets.XCLAW_SKILL_STORE_FEISHU_ICONS_TABLE }}
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - name: Check out source from private repo
+        uses: actions/checkout@v4
+        with:
+          repository: wyatt-study/daziclaw
+          ref: ${{ github.event.inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Bun
+        shell: bash
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare arm64 packaged runtime
+        run: bun run electron:prepare:runtime --platform=darwin --arch=arm64 --require-skill-store-source
+      - name: Build macOS arm64 package
+        shell: bash
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          bash scripts/electron-dist-mac.sh --arm64
+
+      - name: Cleanup DMG mounts before x64 build
+        shell: bash
+        run: |
+          hdiutil detach /Volumes/XClaw* 2>/dev/null || true
+          sleep 5
+
+      - name: Prepare x64 packaged runtime
+        run: bun run electron:prepare:runtime --platform=darwin --arch=x64 --require-skill-store-source
+      - name: Build macOS x64 package
+        shell: bash
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          for attempt in 1 2 3; do
+            bash scripts/electron-dist-mac.sh --x64 && break
+            echo "Attempt $attempt failed, retrying in 10s..."
+            hdiutil detach /Volumes/XClaw* 2>/dev/null || true
+            sleep 10
+          done
+
+      - name: Upload macOS packages to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG_NAME="v$(node -p "require('./package.json').version")"
+          gh release view "${TAG_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "${TAG_NAME}" --repo "${{ github.repository }}" \
+              --title "XClaw ${TAG_NAME#v}" \
+              --notes "Automated desktop builds for ${TAG_NAME}."
+          gh release upload "${TAG_NAME}" \
+            apps/electron/release/XClaw-arm64.dmg \
+            apps/electron/release/XClaw-arm64.zip \
+            apps/electron/release/XClaw-x64.dmg \
+            apps/electron/release/XClaw-x64.zip \
+            apps/electron/release/latest-mac.yml \
+            --clobber --repo "${{ github.repository }}"
+
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Check out source from private repo
+        uses: actions/checkout@v4
+        with:
+          repository: wyatt-study/daziclaw
+          ref: ${{ github.event.inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Bun
+        shell: pwsh
+        run: |
+          irm https://bun.sh/install.ps1 | iex
+          "$env:USERPROFILE\.bun\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install dependencies
+        shell: pwsh
+        run: bun install --frozen-lockfile
+
+      - name: Prepare x64 packaged runtime
+        shell: pwsh
+        run: bun run electron:prepare:runtime --platform=win32 --arch=x64 --require-skill-store-source
+      - name: Build Windows x64 package
+        shell: pwsh
+        run: |
+          $env:NODE_OPTIONS="--max-old-space-size=4096"
+          bun run electron:build
+          Set-Location apps/electron
+          npx electron-builder --config electron-builder.yml --win --x64 --publish never
+
+      - name: Upload Windows packages to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tagName = "v$(node -p "require('./package.json').version")"
+          gh release view $tagName --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tagName --repo "${{ github.repository }}" --title "XClaw $($tagName.Substring(1))" --notes "Automated desktop builds for $tagName."
+          }
+          Get-ChildItem apps/electron/release/XClaw-*.exe | ForEach-Object {
+            gh release upload $tagName $_.FullName --clobber --repo "${{ github.repository }}"
+          }
+          $latestYml = Get-ChildItem apps/electron/release/latest*.yml -ErrorAction SilentlyContinue
+          if ($latestYml) {
+            $latestYml | ForEach-Object { gh release upload $tagName $_.FullName --clobber --repo "${{ github.repository }}" }
+          }
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out source from private repo
+        uses: actions/checkout@v4
+        with:
+          repository: wyatt-study/daziclaw
+          ref: ${{ github.event.inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Bun
+        shell: bash
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare x64 packaged runtime
+        run: bun run electron:prepare:runtime --platform=linux --arch=x64 --require-skill-store-source
+      - name: Build Linux x64 package
+        shell: bash
+        run: |
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          bun run electron:build
+          cd apps/electron
+          npx electron-builder --config electron-builder.yml --linux --x64 --publish never
+
+      - name: Upload Linux packages to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG_NAME="v$(node -p "require('./package.json').version")"
+          gh release upload "${TAG_NAME}" \
+            apps/electron/release/XClaw-*.AppImage \
+            apps/electron/release/latest*.yml \
+            --clobber --repo "${{ github.repository }}" || true
