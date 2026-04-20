@@ -104,7 +104,8 @@ jobs:
           gh release view "${TAG_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
             gh release create "${TAG_NAME}" --repo "${{ github.repository }}" \
               --title "XClaw ${TAG_NAME#v}" \
-              --notes "Automated desktop builds for ${TAG_NAME}."
+              --notes "Automated desktop builds for ${TAG_NAME}." \
+              --draft
           gh release upload "${TAG_NAME}" \
             apps/electron/release/XClaw-arm64.dmg \
             apps/electron/release/XClaw-arm64.zip \
@@ -159,7 +160,7 @@ jobs:
           $tagName = "v$(node -p "require('./package.json').version")"
           gh release view $tagName --repo "${{ github.repository }}" 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tagName --repo "${{ github.repository }}" --title "XClaw $($tagName.Substring(1))" --notes "Automated desktop builds for $tagName."
+            gh release create $tagName --repo "${{ github.repository }}" --title "XClaw $($tagName.Substring(1))" --notes "Automated desktop builds for $tagName." --draft
           }
           Get-ChildItem apps/electron/release/XClaw-*.exe | ForEach-Object {
             gh release upload $tagName $_.FullName --clobber --repo "${{ github.repository }}"
